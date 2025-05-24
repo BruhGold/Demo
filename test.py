@@ -37,16 +37,20 @@ class APIRequest:
             response = requests.get(self.url, headers=self.headers, params=self.params)
         elif self.method == "POST":
             response = requests.post(self.url, headers=self.headers, params=self.params, json=self.payload)
+        elif self.method == "PUT":
+            response = requests.put(self.url, headers=self.headers, params=self.params, json=self.payload)
+        elif self.method == "DELETE":
+            response = requests.delete(self.url, headers=self.headers, params=self.params)
         else:
             raise ValueError(f"Unsupported HTTP method: {self.method}")
 
-        return response.json()
+        return response
         
 
     # The 2 methods below are for obtaining and refreshing the access token and storing it in the storage
     def GetAccessToken(self):
         payload = {
-            "api_secret": "secret",
+            "api_secret": settings.TOKEN_OBTAIN_SECRET,
             "provider": "moodle",
             "uid": 1 # This should be replaced with the actual user ID
         }
@@ -76,21 +80,26 @@ class APIRequest:
     
     def run(self):
         # Simulate running the request
-        response = self.send()
-        if response.get("code") == "token_not_valid":
+        response = self.send() # Initial attempt, use old token in storage
+
+        if response.status_code == 401:  # Unauthorized
             try:
                 self.TryRefreshToken()
-                response = self.send()
+                response = self.send() # Retry with access token obtained from refresh token
             except Exception as e:
                 print(f"Error refreshing token: {e}")
                 self.ClearTokens()
                 try:
                     self.GetAccessToken()
-                    response = self.send()
+                    response = self.send() # Retry with new access token, if refresh token is invalid
                 except Exception as e:
                     print(f"Error obtaining new access token: {e}")
-                    return self.send()  # Final attempt, anonymous
-        return response
+                    if self.method in ["GET"]:
+                        response = self.send()
+                    else:
+                        raise Exception("Cannot send authenticated request without valid token")
+
+        return response.json()
 
 # inheriting from APIRequest to create a specific request
 class GetProblemDetails(APIRequest):
@@ -100,23 +109,58 @@ class GetProblemDetails(APIRequest):
         headers = {"Content-Type": "application/json"}
         super().__init__(url, method, headers=headers)
 
+# Example of APIRequest that requires authentication
+class UpdateProblem(APIRequest):
+    def __init__(self, problem_id, payload):
+        url = f"{settings.DOMAIN}/api/v2/problem/{problem_id}"
+        method = "PUT"
+        headers = {"Content-Type": "application/json"}
+        super().__init__(url, method, headers=headers, payload=payload)
+
 # Example usage
 if __name__ == "__main__":
-    api_request = APIRequest(
-        url=f"{settings.DOMAIN}/api/v2/problems",
-        method="GET",
-        headers={"Content-Type": "application/json"}
-    )
+    # Example usage of APIRequest
+    #api_request = APIRequest(
+    #    url=f"{settings.DOMAIN}/api/v2/problems",
+    #    method="GET",
+    #    headers={"Content-Type": "application/json"}
+    #)
 
-    response = api_request.run()
-    print(json.dumps(response, indent=4))
+    #print(api_request.storage.get("access_token"))
 
-    print("\n\n ====================================================== \n\n")
+    #response = api_request.run()
+    #print(json.dumps(response, indent=4, ensure_ascii=False))
+
+    #print("\n\n ====================================================== \n\n")
 
     # Example usage of GetProblemDetails
-    problem_id = "t12345"
-    problem_request = GetProblemDetails(
-        problem_id=problem_id
+    problem_id = "newproblem" # I can update the profile Language back to "en" if needed
+    #problem_id = "t12345" # The user does not have permission to edit this problem, you can test it out
+    #problem_request = GetProblemDetails(
+    #    problem_id=problem_id
+    #)
+
+    #problem_response = problem_request.run()
+    #print(json.dumps(problem_response, indent=4, ensure_ascii=False))
+
+    #print("\n\n ====================================================== \n\n")
+
+    # example of UpdateProblem
+    payload = {
+        #"code": "t12345",
+        #"name": "Sample Problem Put",
+        #"description": "Solve this simple problem.",
+        #"authors": [1],  
+        #"curators": [],  
+        #"testers": [],  
+        #"types": [1],  
+        #"group": 1,
+        #"is_public": True,
+        #"organizations": [1]
+    }
+    update_problem_request = UpdateProblem(
+        problem_id=problem_id,
+        payload=payload
     )
-    problem_response = problem_request.run()
-    print(json.dumps(problem_response, indent=4))
+    update_problem_response = update_problem_request.run()
+    print(json.dumps(update_problem_response, indent=4, ensure_ascii=False))
